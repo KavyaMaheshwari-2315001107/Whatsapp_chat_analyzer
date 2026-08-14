@@ -2,41 +2,56 @@ import re
 import pandas as pd
 
 def preprocess(data):
-    pattern = r'\d{1,2}/\d{1,2}/\d{2,4},\s\d{1,2}:\d{2}\s-\s'
+    pattern = r'(\d{1,2}/\d{1,2}/\d{2,4},\s\d{1,2}:\d{2}(?:\s?[APap][Mm])?\s-\s)'
 
-    messages = re.split(pattern, data)[1:]
-    dates = re.findall(pattern, data)
+    split_data = re.split(pattern, data)
+
+    messages = []
+    dates = []
+
+    for i in range(1, len(split_data), 2):
+        dates.append(split_data[i])
+        messages.append(split_data[i + 1])
 
     df = pd.DataFrame({
-        'user_message': messages,
-        'message_date': dates
+        'message_date': dates,
+        'user_message': messages
     })
 
+    # Remove trailing " - "
+    df['message_date'] = df['message_date'].str.replace(r'\s-\s$', '', regex=True)
+
+    # Convert to datetime
     df['message_date'] = pd.to_datetime(
         df['message_date'],
-        format='%d/%m/%Y, %H:%M - '
+        dayfirst=True,
+        errors='coerce'
     )
+
+    # Remove invalid rows
+    df = df.dropna(subset=['message_date'])
 
     df.rename(columns={'message_date': 'date'}, inplace=True)
 
     users = []
-    messages = []
+    final_messages = []
 
     for message in df['user_message']:
-        entry = re.split(r'([\w\W]+?):\s', message)
+        entry = re.split(r'([^:]+):\s', message, maxsplit=1)
 
-        if entry[1:]:
-            users.append(entry[1])
-            messages.append(" ".join(entry[2:]))
+        if len(entry) >= 3:
+            users.append(entry[1].strip())
+            final_messages.append(entry[2].strip())
         else:
             users.append('group_notification')
-            messages.append(entry[0])
+            final_messages.append(entry[0].strip())
 
     df['user'] = users
-    df['message'] = messages
+    df['message'] = final_messages
 
     df.drop(columns=['user_message'], inplace=True)
 
+    # Date features
     df['only_date'] = df['date'].dt.date
     df['year'] = df['date'].dt.year
     df['month_num'] = df['date'].dt.month
@@ -50,11 +65,11 @@ def preprocess(data):
 
     for hour in df['hour']:
         if hour == 23:
-            period.append(f"{hour}-00")
+            period.append(f'{hour}-00')
         elif hour == 0:
-            period.append("00-1")
+            period.append('00-1')
         else:
-            period.append(f"{hour}-{hour+1}")
+            period.append(f'{hour}-{hour+1}')
 
     df['period'] = period
 
